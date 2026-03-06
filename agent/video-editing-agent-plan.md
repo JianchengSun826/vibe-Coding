@@ -785,6 +785,206 @@ ffmpeg -i input.mp4 -vf scale=1280:720 input_720p.mp4
 
 ---
 
+## 9. Docker 运行指南（Step by Step）
+
+> 适用于：不想配置本地 Python/FFmpeg 环境，或需要分享给其他用户的场景。用户只需安装 Docker，无需任何其他依赖。
+
+### Step 1：安装 Docker
+
+```bash
+# macOS
+brew install --cask docker
+# 安装后打开 Docker Desktop 应用，等待启动完成
+
+# Ubuntu
+sudo apt install docker.io
+sudo systemctl start docker
+sudo usermod -aG docker $USER   # 免 sudo 运行
+```
+
+```bash
+# 验证安装
+docker --version   # Docker version 25.x.x
+```
+
+Windows 用户下载 Docker Desktop 安装包即可。
+
+---
+
+### Step 2：创建 Dockerfile
+
+在项目根目录新建 `Dockerfile`：
+
+```dockerfile
+FROM python:3.11-slim
+
+# 安装 FFmpeg（系统依赖）
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# 设置工作目录
+WORKDIR /app
+
+# 先复制依赖文件（利用 Docker 缓存层，依赖不变则不重新安装）
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 复制代码
+COPY src/ ./src/
+
+# 默认入口
+ENTRYPOINT ["python", "src/main.py"]
+```
+
+`requirements.txt`：
+
+```
+anthropic
+deepgram-sdk
+pydub
+scenedetect
+ffmpeg-python
+python-dotenv
+```
+
+同时创建 `.dockerignore`（避免把视频文件打包进镜像）：
+
+```
+input/
+output/
+venv/
+.env
+*.mp4
+*.mov
+```
+
+---
+
+### Step 3：构建镜像
+
+```bash
+# 在项目根目录执行（注意末尾的点）
+docker build -t video-agent .
+
+# 构建过程输出：
+# Step 1/7 : FROM python:3.11-slim
+# Step 2/7 : RUN apt-get install ffmpeg...
+# ...
+# Successfully tagged video-agent:latest
+```
+
+构建只需一次，代码不变则无需重新构建。
+
+---
+
+### Step 4：运行 Agent
+
+```bash
+docker run --rm \
+  -e ANTHROPIC_API_KEY=sk-ant-xxxxx \
+  -e DEEPGRAM_API_KEY=xxxxx \
+  -v $(pwd)/input:/app/input \
+  -v $(pwd)/output:/app/output \
+  video-agent \
+  --input input/raw_video.mp4 \
+  --output output/result.mp4 \
+  --duration 60 \
+  --instruction "保留最精彩的内容"
+```
+
+参数说明：
+
+| 参数 | 作用 |
+|------|------|
+| `--rm` | 容器运行完自动删除，不留垃圾 |
+| `-e KEY=value` | 注入环境变量（API Key）|
+| `-v 本地路径:/app/input` | 把本地文件夹挂载进容器 |
+
+---
+
+### Step 5：用 .env 文件简化命令
+
+```bash
+# .env 文件
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+DEEPGRAM_API_KEY=xxxxx
+```
+
+```bash
+# 用 --env-file 替代多个 -e
+docker run --rm \
+  --env-file .env \
+  -v $(pwd)/input:/app/input \
+  -v $(pwd)/output:/app/output \
+  video-agent \
+  --input input/raw_video.mp4 \
+  --output output/result.mp4 \
+  --duration 60
+```
+
+---
+
+### Step 6：封装成一行命令
+
+在项目根目录创建 `run.sh`：
+
+```bash
+#!/bin/bash
+docker run --rm \
+  --env-file .env \
+  -v $(pwd)/input:/app/input \
+  -v $(pwd)/output:/app/output \
+  video-agent "$@"
+```
+
+```bash
+chmod +x run.sh
+
+# 之后每次只需：
+./run.sh --input input/raw.mp4 --output output/result.mp4 --duration 60
+```
+
+---
+
+### 分享给其他用户的流程
+
+用户收到项目后只需 4 步，**不需要安装 Python、FFmpeg 或任何其他依赖**：
+
+```bash
+# 1. 安装 Docker Desktop（一次性）
+
+# 2. 克隆项目
+git clone https://github.com/xxx/video-agent.git && cd video-agent
+
+# 3. 配置 API Key
+cp .env.example .env && nano .env
+
+# 4. 构建并运行
+docker build -t video-agent .
+./run.sh --input input/video.mp4 --output output/result.mp4 --duration 60
+```
+
+---
+
+### 常用维护命令
+
+```bash
+# 查看本地镜像列表
+docker images
+
+# 代码有改动后重新构建
+docker build -t video-agent .
+
+# 删除旧镜像释放空间
+docker rmi video-agent
+
+# 进入容器内部调试
+docker run --rm -it --env-file .env \
+  -v $(pwd)/input:/app/input \
+  video-agent bash
+```
+
+---
+
 ## 附录：技术栈汇总
 
 | 组件 | 选型 | 用途 |
