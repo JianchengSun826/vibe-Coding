@@ -596,6 +596,195 @@ Web 界面
 
 ---
 
+## 8. 本地运行指南（Step by Step）
+
+> 适用于：已有代码实现后，首次在本地运行的完整操作流程。
+
+### Step 1：安装系统依赖
+
+```bash
+# macOS
+brew install python@3.11 ffmpeg
+
+# 验证
+python3 --version   # 需要 3.10+
+ffmpeg -version     # 需要 5.0+
+```
+
+```bash
+# Windows（用 Scoop）
+scoop install python ffmpeg
+
+# Ubuntu/Debian
+sudo apt install python3 python3-pip ffmpeg
+```
+
+---
+
+### Step 2：克隆项目 & 安装 Python 依赖
+
+```bash
+git clone https://github.com/xxx/video-agent.git
+cd video-agent
+
+# 创建虚拟环境（隔离依赖，避免污染系统）
+python3 -m venv venv
+source venv/bin/activate        # macOS/Linux
+# venv\Scripts\activate         # Windows
+
+# 安装依赖
+pip install anthropic deepgram-sdk pydub scenedetect ffmpeg-python python-dotenv
+```
+
+---
+
+### Step 3：申请 API Key
+
+需要两个 Key：
+
+**Anthropic（Claude）**
+1. 访问 [console.anthropic.com](https://console.anthropic.com)
+2. 注册 → API Keys → Create Key
+3. 复制保存
+
+**Deepgram（语音识别）**
+1. 访问 [console.deepgram.com](https://console.deepgram.com)
+2. 注册送 $200 免费额度（足够测试）
+3. Create API Key → 复制保存
+
+---
+
+### Step 4：配置环境变量
+
+```bash
+# 在项目根目录创建 .env 文件
+cp .env.example .env
+
+# 编辑填入 Key
+nano .env
+```
+
+`.env` 内容：
+
+```
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+DEEPGRAM_API_KEY=xxxxx
+```
+
+---
+
+### Step 5：准备视频文件
+
+```bash
+# 建议目录结构
+video-agent/
+├── input/
+│   └── raw_video.mp4     ← 把原始视频放这里
+├── output/               ← 成品会出现在这里
+└── src/
+```
+
+支持格式：MP4、MOV、AVI、MKV
+
+---
+
+### Step 6：运行 Agent
+
+```bash
+# 基本用法
+python src/main.py \
+  --input input/raw_video.mp4 \
+  --output output/result.mp4 \
+  --duration 60 \
+  --instruction "保留最精彩的内容，删除停顿和重复"
+```
+
+运行时终端输出：
+
+```
+1/5 语音识别中...
+2/5 视频分析中...
+3/5 AI 生成剪辑方案...
+
+剪辑方案：保留 8 个片段
+预计时长：58.3 秒
+  [12.5s ~ 45.0s] 核心论点介绍
+  [67.2s ~ 89.5s] 精彩案例演示
+  ...
+
+4/5 渲染中...
+5/5 烧录字幕...
+✓ 完成！输出：output/result.mp4
+```
+
+---
+
+### Step 7：查看 & 调整结果
+
+Agent 同时输出 JSON 时间线文件，供手动微调：
+
+```json
+// output/result_timeline.json
+{
+  "segments": [
+    {"start": 12.5, "end": 45.0, "reason": "核心论点"},
+    {"start": 67.2, "end": 89.5, "reason": "精彩案例"}
+  ],
+  "removed_reasons": ["00:00~00:12 开场寒暄"]
+}
+```
+
+调整后重新渲染（无需重跑 AI）：
+
+```bash
+# 修改 JSON 后只重新渲染，不重新调用 API
+python src/renderer.py \
+  --input input/raw_video.mp4 \
+  --timeline output/result_timeline.json \
+  --output output/result_v2.mp4
+
+# 或换个指令重新跑完整流程
+python src/main.py \
+  --input input/raw_video.mp4 \
+  --instruction "只保留技术干货，删除所有闲聊"
+```
+
+---
+
+### 处理时间参考
+
+| 步骤 | 耗时（1 小时视频）|
+|------|----------------|
+| 安装依赖（一次性）| 5~10 分钟 |
+| 语音识别 | 1~2 分钟（API）|
+| 视频分析 | 30~60 秒（本地）|
+| AI 决策 | 10~20 秒（API）|
+| 渲染 | 2~5 分钟（本地 CPU）|
+| **总计** | **约 5~10 分钟** |
+
+---
+
+### 常见问题排查
+
+```bash
+# FFmpeg 找不到？
+which ffmpeg
+export PATH="/opt/homebrew/bin:$PATH"   # macOS M1/M2 补充路径
+
+# 虚拟环境未激活（pip 装到了系统而非项目）？
+source venv/bin/activate                # 每次新开终端都需要执行
+
+# 视频文件太大，处理慢？
+# 先降低分辨率再处理，速度提升 3~5 倍
+ffmpeg -i input.mp4 -vf scale=1280:720 input_720p.mp4
+
+# API 余额不足？
+# Deepgram 注册免费 $200 ≈ 900 小时音频
+# Anthropic 充值 $5 可处理约 2,500 个视频
+```
+
+---
+
 ## 附录：技术栈汇总
 
 | 组件 | 选型 | 用途 |
